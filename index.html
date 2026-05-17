@@ -17,7 +17,8 @@
 // ==================== 配置 ====================
 const WORLD=50, SNAKE_SPEED=8, SEG_SPACE=0.8, TURN_SPEED=10;
 const MAX_HISTORY=300, REWIND_DRAIN=1.0, ENERGY_MAX=100, ENERGY_REGEN=0.10;
-const COMBO_TIMEOUT=2200, PARTICLE_LIMIT=300;
+const COMBO_TIMEOUT=2200, COMBO_BOOST=0.15, COMBO_MAX=5, COMBO_DECAY=2200;
+const PARTICLE_LIMIT=300;
 const FOOD_TARGET=12, FOOD_MIN=7, AI_COUNT=3, AI_RESPAWN=12;
 const AI_DEATH_RATE=0.4, VIEW_CELLS=26;
 const EAT_RADIUS=0.8, HIT_RADIUS=0.45;
@@ -191,7 +192,8 @@ class Game {
     makeSnake(x,y,len,angle,ci=-1){
         const body=[];
         for(let i=0;i<len;i++) body.push({x:x-Math.cos(angle)*i*SEG_SPACE,y:y-Math.sin(angle)*i*SEG_SPACE});
-        return{body,angle,targetAngle:angle,alive:true,ci,speed:SNAKE_SPEED,foodEaten:0,growPending:0};
+        return{body,angle,targetAngle:angle,alive:true,ci,foodEaten:0,growPending:0,
+            combo:0,lastEatTime:0,speedBoost:0};
     }
 
     // ---- 食物 ----
@@ -232,14 +234,19 @@ class Game {
     // ---- 蛇移动（通用） ----
     moveSnake(sn,dt){
         if(!sn.alive)return;
+        // 加速衰减：超过 COMBO_DECAY 没吃食物则 combo 归零
+        const now=Date.now();
+        if(sn.combo>0&&now-sn.lastEatTime>COMBO_DECAY)sn.combo=0;
+        // 当前速度 = 基础速度 * (1 + combo * 加成比例)
+        const curSpeed=SNAKE_SPEED*(1+sn.combo*COMBO_BOOST);
         // 平滑转向
         const diff=angleDiff(sn.angle,sn.targetAngle);
         const turn=Math.min(Math.abs(diff),TURN_SPEED*dt);
         sn.angle+=Math.sign(diff)*turn;
         // 移动头部
         const head=sn.body[0];
-        head.x+=Math.cos(sn.angle)*sn.speed*dt;
-        head.y+=Math.sin(sn.angle)*sn.speed*dt;
+        head.x+=Math.cos(sn.angle)*curSpeed*dt;
+        head.y+=Math.sin(sn.angle)*curSpeed*dt;
         // 身体跟随：每段保持固定距离
         for(let i=1;i<sn.body.length;i++){
             const prev=sn.body[i-1],cur=sn.body[i];
@@ -262,7 +269,9 @@ class Game {
     saveState(){
         this.history.push({
             body:this.player.body.map(p=>({...p})),angle:this.player.angle,
-            foods:this.foods.map(f=>({...f})),score:this.score,foodEaten:this.foodEaten,combo:this.combo
+            foods:this.foods.map(f=>({...f})),score:this.score,foodEaten:this.foodEaten,combo:this.combo,
+            pCombo:this.player.combo,pFoodEaten:this.player.foodEaten,pGrowPending:this.player.growPending,
+            pLastEatTime:this.player.lastEatTime
         });
         if(this.history.length>MAX_HISTORY)this.history.shift();
     }
@@ -272,6 +281,8 @@ class Game {
             const s=this.history.pop();
             this.player.body=s.body;this.player.angle=s.angle;
             this.foods=s.foods;this.score=s.score;this.foodEaten=s.foodEaten;this.combo=s.combo;
+            this.player.combo=s.pCombo;this.player.foodEaten=s.pFoodEaten;
+            this.player.growPending=s.pGrowPending;this.player.lastEatTime=s.pLastEatTime;
         }
         this.timeEnergy-=REWIND_DRAIN;
         if(this.timeEnergy<=0){this.timeEnergy=0;this.isRewinding=false;this.sfx.stopRw();}
@@ -407,7 +418,11 @@ class Game {
                 }
                 // AI吃食物
                 if(ai.alive){for(let fi=this.foods.length-1;fi>=0;fi--){
-                    if(dist(ah.x,ah.y,this.foods[fi].x,this.foods[fi].y)<EAT_RADIUS){ai.foodEaten++;ai.growPending++;this.foods.splice(fi,1);break;}}
+                    if(dist(ah.x,ah.y,this.foods[fi].x,this.foods[fi].y)<EAT_RADIUS){
+                        const now=Date.now();
+                        if(now-ai.lastEatTime<COMBO_TIMEOUT)ai.combo=Math.min(ai.combo+1,COMBO_MAX);else ai.combo=0;
+                        ai.lastEatTime=now;
+                        ai.foodEaten++;ai.growPending++;this.foods.splice(fi,1);break;}}
                 }
             }
             this.timeEnergy=Math.min(ENERGY_MAX,this.timeEnergy+ENERGY_REGEN);
@@ -436,13 +451,21 @@ class Game {
 
     eatFood(pos){
         const now=Date.now();
-        if(now-this.lastEatTime<COMBO_TIMEOUT)this.combo=Math.min(this.combo+1,5);else this.combo=0;
+        // 玩家蛇 combo（与 AI 统一规则）
+        if(now-this.player.lastEatTime<COMBO_TIMEOUT)this.player.combo=Math.min(this.player.combo+1,COMBO_MAX);
+        else this.player.combo=0;
+        this.player.lastEatTime=now;
+        // 游戏级 combo（显示和计分）
+        if(now-this.lastEatTime<COMBO_TIMEOUT)this.combo=Math.min(this.combo+1,COMBO_MAX);else this.combo=0;
         this.lastEatTime=now;if(this.combo>this.maxCombo)this.maxCombo=this.combo;
-        const pts=10*(this.combo+1);this.score+=pts;this.foodEaten++;
-        this.player.growPending++;
+        const pts=10*(this.combo+1);this.score+=pts;
+        // 蛇增长
+        this.player.foodEaten++;this.player.growPending++;
+        this.foodEaten++;
         const s=this.w2s(pos.x,pos.y);
         this.ptc.burst(s.x,s.y,C.foodCore,12);
-        this.ptc.popup(s.x,s.y-8,`+${pts}`,this.combo>0?C.comboGlow:C.foodGlow);
+        const boostPct=Math.round(this.player.combo*COMBO_BOOST*100);
+        this.ptc.popup(s.x,s.y-8,`+${pts}${boostPct>0?' ⚡'+boostPct+'%':''}`,this.combo>0?C.comboGlow:C.foodGlow);
         this.sfx.eat(1+this.combo*.1);if(this.combo>0)this.sfx.combo(this.combo);
         this.shakeAmt=Math.min(2+this.combo,5);this.gridPulse=.3;
         this.ensureFood();
@@ -595,6 +618,10 @@ class Game {
             const sz=cs*lerp(.34,.2,ratio);
             const col=isP?lerpColor(C.bodyStart,be,ratio):lerpColor(hc,be,ratio);
             if(i===0){
+                // 加速光环：combo > 0 时显示橙色外圈
+                if(sn.combo>0){
+                    g.drawGlow(ctx,s.x,s.y,sz*3,C.rewindTint,.15+sn.combo*.04);
+                }
                 g.drawGlow(ctx,s.x,s.y,sz*2,hc,.2);
                 ctx.fillStyle=hc;ctx.beginPath();ctx.arc(s.x,s.y,sz,0,Math.PI*2);ctx.fill();
                 ctx.fillStyle=isP?C.headCore:'#fff';ctx.beginPath();ctx.arc(s.x,s.y,sz*.5,0,Math.PI*2);ctx.fill();
@@ -620,8 +647,9 @@ class Game {
         ctx.font='10px "Courier New",monospace';ctx.fillStyle='rgba(0,255,255,0.4)';ctx.fillText('SCORE',20,12);
         ctx.fillStyle='rgba(255,80,80,0.7)';ctx.fillText(`KILL ${this.kills}`,110,32);
         if(this.combo>0&&Date.now()-this.lastEatTime<COMBO_TIMEOUT+400){
+            const boostPct=Math.round(this.combo*COMBO_BOOST*100);
             ctx.font=`bold ${Math.round(18*(1+Math.sin(this.time*8)*.08))}px "Courier New",monospace`;
-            ctx.fillStyle=C.comboGlow;ctx.textAlign='center';ctx.fillText(`${this.combo+1}x`,w/2,32);}
+            ctx.fillStyle=C.comboGlow;ctx.textAlign='center';ctx.fillText(`${this.combo+1}x ⚡${boostPct}%`,w/2,32);}
         const bw=Math.min(120,w*.22),bh=10,bx=w-bw-18,by=18;
         ctx.fillStyle=C.energyBg;ctx.fillRect(bx,by,bw,bh);
         const er=this.timeEnergy/ENERGY_MAX;ctx.fillStyle=C.energyBar;ctx.fillRect(bx,by,bw*er,bh);
