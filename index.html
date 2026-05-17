@@ -75,7 +75,7 @@ class GlowCache {
     }
     // 画一个带发光的圆（高性能版）
     drawGlow(ctx,x,y,radius,color,alpha=1){
-        const glow=this.get(color,radius*3);
+        const glow=this.get(color,Math.ceil(radius*3));
         ctx.globalAlpha=alpha;
         ctx.drawImage(glow,x-glow.width/2,y-glow.height/2);
     }
@@ -356,6 +356,7 @@ class Game {
         const head=ai.body[0],nearF=this.nearestFood(head);if(!nearF)return;
         const dirs=[{x:0,y:-1},{x:0,y:1},{x:-1,y:0},{x:1,y:0}];
         dirs.sort((a,b)=>(Math.abs(head.x+a.x-nearF.x)+Math.abs(head.y+a.y-nearF.y))-(Math.abs(head.x+b.x-nearF.x)+Math.abs(head.y+b.y-nearF.y)));
+        // 只建一次碰撞集合
         const bodies=new Set();
         for(const sn of this.allSnakes())sn.body.forEach((p,si)=>{if(sn===ai&&si===sn.body.length-1)return;bodies.add(`${p.x},${p.y}`);});
         let chosen=null;
@@ -365,8 +366,8 @@ class Game {
         if(!chosen)return;
         ai.dir=chosen;const nh={x:head.x+ai.dir.x,y:head.y+ai.dir.y};
         if(this.isWall(nh.x,nh.y)){this.aiDeath(ai,idx);return;}
-        const ab=new Set();for(const sn of this.allSnakes())sn.body.forEach((p,si)=>{if(sn===ai&&si===sn.body.length-1)return;ab.add(`${p.x},${p.y}`);});
-        if(ab.has(`${nh.x},${nh.y}`)){this.aiDeath(ai,idx);return;}
+        // 复用同一个 bodies 集合做碰撞检测
+        if(bodies.has(`${nh.x},${nh.y}`)){this.aiDeath(ai,idx);return;}
         ai.body.unshift(nh);
         const fi=this.foods.findIndex(f=>f.x===nh.x&&f.y===nh.y);
         if(fi>=0){this.foods.splice(fi,1);ai.foodEaten++;if(ai.foodEaten%3===0)ai.growPending++;}
