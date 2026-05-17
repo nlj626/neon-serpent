@@ -296,7 +296,14 @@ class Game {
                 }
                 const dm={'ArrowUp':{x:0,y:-1},'KeyW':{x:0,y:-1},'ArrowDown':{x:0,y:1},'KeyS':{x:0,y:1},
                           'ArrowLeft':{x:-1,y:0},'KeyA':{x:-1,y:0},'ArrowRight':{x:1,y:0},'KeyD':{x:1,y:0}};
-                if(dm[e.code]){self.queueDir(dm[e.code]);e.preventDefault();}
+                if(dm[e.code]){
+                    const d=dm[e.code];
+                    // 立即更新视觉方向，减少感知延迟
+                    if(d.x!==-self.player.dir.x||d.y!==-self.player.dir.y){
+                        if(d.x!==self.visualDir.x||d.y!==self.visualDir.y) self.visualDir={...d};
+                    }
+                    self.queueDir(d);e.preventDefault();
+                }
             }
         });
         window.addEventListener('keyup',e=>{
@@ -365,8 +372,12 @@ class Game {
         this.joyX=dx;this.joyY=dy;
         const threshold=jp.r*.25;
         if(d>threshold){
-            if(Math.abs(dx)>Math.abs(dy))this.queueDir(dx>0?{x:1,y:0}:{x:-1,y:0});
-            else this.queueDir(dy>0?{x:0,y:1}:{x:0,y:-1});
+            let nd;
+            if(Math.abs(dx)>Math.abs(dy))nd=dx>0?{x:1,y:0}:{x:-1,y:0};
+            else nd=dy>0?{x:0,y:1}:{x:0,y:-1};
+            // 立即更新视觉方向
+            if(nd.x!==-this.player.dir.x||nd.y!==-this.player.dir.y) this.visualDir={...nd};
+            this.queueDir(nd);
         }
     }
 
@@ -482,7 +493,8 @@ class Game {
         } else {
             if(ai.growPending>0)ai.growPending--;else ai.body.pop();
         }
-        if(ai.body.length>25)ai.body.pop();
+        // 只有没吃食物且没增长时才限制长度，避免双重pop
+        if(fi<0&&ai.growPending===0&&ai.body.length>25)ai.body.pop();
     }
 
     nearestFood(pos){
@@ -605,6 +617,8 @@ class Game {
         this.menuSnake=[];
         const cx=Math.floor(WORLD/2),cy=Math.floor(WORLD/2);
         for(let i=0;i<12;i++)this.menuSnake.push({x:cx-i,y:cy});
+        // 菜单摄像机居中，让演示蛇显示在屏幕中央
+        this.camX=cx;this.camY=cy;
     }
 
     // ---- 渲染 ----
