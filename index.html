@@ -195,11 +195,15 @@ class Game {
         this.cv.width=window.innerWidth*dpr;this.cv.height=window.innerHeight*dpr;
         this.ctx.setTransform(dpr,0,0,dpr,0,0);
         this.W=window.innerWidth;this.H=window.innerHeight;
-        this.hudH=50;this.joyAreaH=this.isTouch?160:0;
+        this.isLandscape=this.W>this.H;
+        this.hudH=45;
+        // 横屏：摇杆浮在游戏画面上，游戏占满全屏
+        // 竖屏：保留底部摇杆区
+        if(this.isLandscape||!this.isTouch){this.joyAreaH=0;}
+        else{this.joyAreaH=140;}
         this.gameTop=this.hudH;this.gameBot=this.H-this.joyAreaH;
         this.gameH=this.gameBot-this.gameTop;this.gameW=this.W;
         this.cellSize=Math.max(8,Math.floor(Math.min(this.gameW,this.gameH)/VIEW_CELLS));
-        // 清除发光贴图缓存（尺寸变了）
         this.glow.cache.clear();
     }
 
@@ -290,8 +294,16 @@ class Game {
 
     initTouch(){
         const self=this;
-        this.getJP=()=>{const cx=this.W/2,cy=this.gameBot+this.joyAreaH/2,r=Math.min(this.W*.17,this.joyAreaH*.33);return{cx,cy,r,tr:r*.4};};
-        this.getRP=()=>{const r=Math.min(this.W*.07,this.joyAreaH*.18);return{cx:this.W-r-18,cy:this.gameBot+this.joyAreaH/2,r};};
+        // 横屏：摇杆浮在左下角，倒流按钮浮在右下角
+        // 竖屏：摇杆居中底部，倒流按钮右侧
+        this.getJP=()=>{
+            if(this.isLandscape){const r=Math.min(this.H*.16,this.W*.07);return{cx:r+25,cy:this.H-r-20,r,tr:r*.4};}
+            const cx=this.W/2,cy=this.gameBot+this.joyAreaH/2,r=Math.min(this.W*.17,this.joyAreaH*.33);return{cx,cy,r,tr:r*.4};
+        };
+        this.getRP=()=>{
+            if(this.isLandscape){const r=Math.min(this.H*.1,this.W*.04);return{cx:this.W-r-25,cy:this.H-r-25,r};}
+            const r=Math.min(this.W*.07,this.joyAreaH*.18);return{cx:this.W-r-18,cy:this.gameBot+this.joyAreaH/2,r};
+        };
         this.cv.addEventListener('touchstart',e=>{e.preventDefault();self.audio.resume();
             for(const t of e.changedTouches){
                 if(self.state==='MENU'||self.state==='GAMEOVER'){self.startGame();return;}
@@ -473,6 +485,8 @@ class Game {
             ctx.restore();
         }catch(e){console.error('render viewport error:',e);try{ctx.restore();}catch(e2){}}
         this.renderHUD(ctx,w);
+        // 竖屏旋转提示（仅触屏设备）
+        if(this.isTouch&&!this.isLandscape){this.renderRotateHint(ctx,w,h);}
         if(this.isTouch&&this.state==='PLAYING')this.renderJoystick(ctx,g);
         if(this.isRewinding)this.renderRewindFX(ctx,w,h);
         if(this.state==='PLAYING')this.renderMinimap(ctx);
@@ -599,13 +613,26 @@ class Game {
         ctx.restore();
     }
 
+    renderRotateHint(ctx,w,h){
+        // 竖屏时在游戏画面底部显示一个小提示条
+        ctx.save();ctx.globalAlpha=.6;ctx.textAlign='center';ctx.textBaseline='middle';
+        const barH=28,y=h-barH;
+        ctx.fillStyle='rgba(0,0,0,0.6)';ctx.fillRect(0,y,w,barH);
+        ctx.font='12px "Courier New",monospace';ctx.fillStyle='#00ffff';
+        ctx.fillText('↻ 横屏体验更佳',w/2,y+barH/2);
+        ctx.restore();
+    }
+
     renderJoystick(ctx,g){
         const jp=this.getJP(),rp=this.getRP();
-        ctx.fillStyle='rgba(5,5,16,0.85)';ctx.fillRect(0,this.gameBot,this.W,this.joyAreaH);
-        ctx.strokeStyle='rgba(0,255,255,0.1)';ctx.lineWidth=1;
-        ctx.beginPath();ctx.moveTo(0,this.gameBot);ctx.lineTo(this.W,this.gameBot);ctx.stroke();
-        // 底座
-        ctx.save();ctx.globalAlpha=.4;
+        // 竖屏时画底部摇杆区背景
+        if(!this.isLandscape&&this.joyAreaH>0){
+            ctx.fillStyle='rgba(5,5,16,0.85)';ctx.fillRect(0,this.gameBot,this.W,this.joyAreaH);
+            ctx.strokeStyle='rgba(0,255,255,0.1)';ctx.lineWidth=1;
+            ctx.beginPath();ctx.moveTo(0,this.gameBot);ctx.lineTo(this.W,this.gameBot);ctx.stroke();
+        }
+        // 摇杆底座
+        ctx.save();ctx.globalAlpha=this.isLandscape?.25:.4;
         ctx.beginPath();ctx.arc(jp.cx,jp.cy,jp.r,0,Math.PI*2);
         ctx.fillStyle=C.joyBase;ctx.fill();ctx.strokeStyle=C.joyBorder;ctx.lineWidth=2;ctx.stroke();ctx.restore();
         // 拇指
@@ -613,10 +640,6 @@ class Game {
         g.drawGlow(ctx,tx,ty,jp.tr*2,C.joyThumb,this.joyActive?.15:.05);
         ctx.fillStyle=hexRgba(C.joyThumb,this.joyActive?.6:.25);
         ctx.beginPath();ctx.arc(tx,ty,jp.tr,0,Math.PI*2);ctx.fill();
-        // 方向提示
-        ctx.save();ctx.font='bold 9px monospace';ctx.fillStyle='rgba(0,255,255,0.2)';ctx.textAlign='center';
-        ctx.fillText('W',jp.cx,jp.cy-jp.r+11);ctx.fillText('S',jp.cx,jp.cy+jp.r-4);
-        ctx.fillText('A',jp.cx-jp.r+9,jp.cy+3);ctx.fillText('D',jp.cx+jp.r-9,jp.cy+3);ctx.restore();
         // 倒流按钮
         ctx.beginPath();ctx.arc(rp.cx,rp.cy,rp.r,0,Math.PI*2);
         ctx.fillStyle=hexRgba(C.rewindBtn,this.isRewinding?.35:.12);ctx.fill();
