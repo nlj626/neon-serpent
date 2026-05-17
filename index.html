@@ -400,7 +400,9 @@ class Game {
     }
 
     gameOver(){
-        this.state='GAMEOVER';this.deathTime=this.time;this.audio.stopRewind();this.audio.death();
+        this.state='GAMEOVER';this.deathTime=this.time;
+        this.player.alive=false;
+        this.audio.stopRewind();this.audio.death();
         const s=this.w2s(this.player.body[0].x,this.player.body[0].y);
         this.particles.explosion(s.x,s.y,50);this.shakeAmt=12;
         if(this.score>this.highScore){this.highScore=this.score;localStorage.setItem('neonSerpentHigh',this.highScore.toString());}
