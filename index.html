@@ -461,26 +461,28 @@ class Game {
         const ctx=this.ctx,w=this.W,h=this.H,g=this.glow;
         ctx.fillStyle=C.bg;ctx.fillRect(0,0,w,h);
         if(this.state==='MENU'){this.renderMenu(ctx,w,h,g);return;}
-        ctx.save();ctx.beginPath();ctx.rect(0,this.gameTop,this.gameW,this.gameH);ctx.clip();
-        ctx.translate(this.shakeX,this.shakeY);
-        this.renderGrid(ctx);
-        this.renderFoods(ctx,g);
-        for(let i=0;i<this.aiSnakes.length;i++){if(this.aiSnakes[i].alive)this.renderSnake(ctx,this.aiSnakes[i],C.aiColors[i],g);}
-        if(this.player?.alive)this.renderSnake(ctx,this.player,null,g);
-        this.particles.render(ctx,g);
-        // 暗角
-        const cx=w/2,cy=this.gameTop+this.gameH/2,r=Math.max(w,this.gameH)*.65;
-        const vg=ctx.createRadialGradient(cx,cy,r*.35,cx,cy,r);
-        vg.addColorStop(0,'rgba(0,0,0,0)');vg.addColorStop(1,'rgba(0,0,0,0.4)');
-        ctx.fillStyle=vg;ctx.fillRect(0,this.gameTop,w,this.gameH);
-        ctx.restore();
+        // 游戏视口（GAMEOVER 和 PLAYING 都渲染）
+        try{
+            ctx.save();ctx.beginPath();ctx.rect(0,this.gameTop,this.gameW,this.gameH);ctx.clip();
+            ctx.translate(this.shakeX,this.shakeY);
+            this.renderGrid(ctx);
+            this.renderFoods(ctx,g);
+            for(let i=0;i<this.aiSnakes.length;i++){if(this.aiSnakes[i].alive)this.renderSnake(ctx,this.aiSnakes[i],C.aiColors[i],g);}
+            if(this.player?.alive)this.renderSnake(ctx,this.player,null,g);
+            this.particles.render(ctx,g);
+            ctx.restore();
+        }catch(e){console.error('render viewport error:',e);try{ctx.restore();}catch(e2){}}
         this.renderHUD(ctx,w);
         if(this.isTouch&&this.state==='PLAYING')this.renderJoystick(ctx,g);
         if(this.isRewinding)this.renderRewindFX(ctx,w,h);
-        if(this.state==='GAMEOVER'&&this.time-this.deathTime<.3){
-            ctx.fillStyle=`rgba(255,0,68,${(.3-(this.time-this.deathTime))/.3*.25})`;ctx.fillRect(0,0,w,h);}
         if(this.state==='PLAYING')this.renderMinimap(ctx);
-        if(this.state==='GAMEOVER')this.renderGameOver(ctx,w,h);
+        // GAMEOVER 必须最后渲染，独立于游戏视口
+        if(this.state==='GAMEOVER'){
+            // 死亡闪光
+            const dt=this.time-this.deathTime;
+            if(dt<.3){ctx.fillStyle=`rgba(255,0,68,${(.3-dt)/.3*.3})`;ctx.fillRect(0,0,w,h);}
+            this.renderGameOver(ctx,w,h);
+        }
     }
 
     renderGrid(ctx){
@@ -674,22 +676,35 @@ class Game {
     }
 
     renderGameOver(ctx,w,h){
-        ctx.fillStyle='rgba(5,5,16,0.7)';ctx.fillRect(0,0,w,h);
+        // 全屏深色遮罩
+        ctx.fillStyle='rgba(5,5,16,0.8)';ctx.fillRect(0,0,w,h);
         const cy=h*.32;
-        ctx.save();ctx.textAlign='center';
-        ctx.font='bold 36px "Courier New",monospace';ctx.fillStyle=C.deathFlash;
+        ctx.save();
+        ctx.textAlign='center';ctx.textBaseline='middle';
+        // 标题
+        ctx.font='bold 34px "Courier New",monospace';ctx.fillStyle='#ff0044';
         ctx.fillText('VOID COLLAPSE',w/2,cy);
-        ctx.font='bold 28px "Courier New",monospace';ctx.fillStyle=C.scoreGlow;
-        ctx.fillText(`${this.score}`,w/2,cy+50);
-        ctx.font='11px "Courier New",monospace';ctx.fillStyle='rgba(0,255,255,0.4)';ctx.fillText('SCORE',w/2,cy+64);
-        ctx.font='12px "Courier New",monospace';ctx.fillStyle='rgba(136,136,204,0.6)';
-        ctx.fillText(`长度 ${this.player?this.player.body.length:0} | 击杀 ${this.kills} | 连击 ${this.maxCombo+1}x`,w/2,cy+90);
+        // 分数
+        ctx.font='bold 30px "Courier New",monospace';ctx.fillStyle='#00ffff';
+        ctx.fillText(String(this.score),w/2,cy+55);
+        ctx.font='12px "Courier New",monospace';ctx.fillStyle='#00ffff';
+        ctx.fillText('SCORE',w/2,cy+72);
+        // 统计
+        const pLen=this.player?this.player.body.length:0;
+        ctx.font='13px "Courier New",monospace';ctx.fillStyle='#8888cc';
+        ctx.fillText(`长度 ${pLen}  击杀 ${this.kills}  连击 ${this.maxCombo+1}x`,w/2,cy+100);
+        // 最高分
         if(this.score>=this.highScore&&this.score>0){
-            ctx.font='bold 14px "Courier New",monospace';ctx.fillStyle=C.foodCore;ctx.fillText('★ NEW BEST ★',w/2,cy+118);
-        } else {ctx.font='11px "Courier New",monospace';ctx.fillStyle='rgba(255,170,0,0.4)';ctx.fillText(`BEST: ${this.highScore}`,w/2,cy+118);}
-        const ra=.35+Math.sin(this.time*3)*.3;
-        ctx.globalAlpha=ra;ctx.font='bold 15px "Courier New",monospace';ctx.fillStyle='#fff';
-        ctx.fillText(this.isTouch?'点击屏幕重新开始':'按 SPACE 重新开始',w/2,cy+158);
+            ctx.font='bold 15px "Courier New",monospace';ctx.fillStyle='#ffff44';
+            ctx.fillText('NEW BEST',w/2,cy+130);
+        } else {
+            ctx.font='12px "Courier New",monospace';ctx.fillStyle='#ffaa00';
+            ctx.fillText('BEST: '+this.highScore,w/2,cy+130);
+        }
+        // 重新开始提示（闪烁）
+        ctx.globalAlpha=.4+Math.sin(this.time*3)*.4;
+        ctx.font='bold 16px "Courier New",monospace';ctx.fillStyle='#ffffff';
+        ctx.fillText(this.isTouch?'点击屏幕重新开始':'按 SPACE 重新开始',w/2,cy+170);
         ctx.restore();
     }
 
